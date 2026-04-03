@@ -1,0 +1,254 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>COVID-19 Global Trends Dashboard</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}" />
+  <!-- Plotly loaded from CDN - no build step required -->
+  <script src="https://cdn.plot.ly/plotly-2.35.2.min.js" crossorigin="anonymous"></script>
+</head>
+<body>
+
+<header>
+  <div class="container">
+    <div class="header-inner">
+      <h1>COVID-19 Global Trends Dashboard</h1>
+      <span class="date-range">{{ date_min }} to {{ date_max }} &nbsp;&bull;&nbsp; {{ countries|length }} countries</span>
+    </div>
+  </div>
+</header>
+
+<main class="container">
+
+  <!-- Controls -->
+  <section class="controls" aria-label="Chart controls">
+
+    <div class="control-group">
+      <label class="control-label" for="countrySelect">Country</label>
+      <select id="countrySelect" aria-label="Select country">
+        {% for c in countries %}
+        <option value="{{ c }}" {% if c == default_country %}selected{% endif %}>{{ c }}</option>
+        {% endfor %}
+      </select>
+    </div>
+
+    <div class="control-group">
+      <fieldset>
+        <legend class="control-label">Metric</legend>
+        <div class="radio-group" role="radiogroup" aria-label="Select metric">
+          {% for key, label in metric_labels.items() %}
+          <label>
+            <input type="radio" name="metric" value="{{ key }}"
+              {% if key == default_metric %}checked{% endif %} />
+            {{ label }}
+          </label>
+          {% endfor %}
+        </div>
+      </fieldset>
+    </div>
+
+    <div class="control-group">
+      <span class="control-label">Overlay</span>
+      <div class="toggle-group">
+        <label>
+          <input type="checkbox" id="rollingToggle" />
+          3 month rolling mean
+        </label>
+      </div>
+    </div>
+
+  </section>
+
+  <!-- Chart -->
+  <section aria-label="COVID-19 trend chart">
+    <div id="chart" role="img" aria-label="COVID-19 trend line chart"></div>
+  </section>
+  <p class="chart-caption">
+    Data: Our World in Data / COVID-19 dataset (monthly sample). Spikes capped at 3&times;IQR outer fence per country to reduce visual distortion.
+  </p>
+
+  <!-- Part E - Insights & Storytelling -->
+  <section class="insights" aria-label="Data insights">
+    <h2>Insights &amp; Data Notes</h2>
+    <div class="insight-grid">
+
+      <div class="insight-item">
+        <h3>Wave Patterns in Case Counts</h3>
+        <p>All five countries show distinct waves driven by variant emergence. Delta (mid 2021) and Omicron (late 2021 to early 2022) are especially prominent. Use <em>Cases per Million</em> to compare across countries of very different population sizes.</p>
+      </div>
+
+      <div class="insight-item">
+        <h3>Vaccination Rollout Lag</h3>
+        <p>Vaccination data is effectively zero before early 2021. The rapid ramp-up from Q1 2021 onward reflects global dose procurement timelines. Canada's <em>vaccinations_per_hundred</em> exceeds 100% by 2023 because booster doses are counted per administration, not per person.</p>
+      </div>
+
+      <div class="insight-item">
+        <h3>Scale &amp; Normalisation</h3>
+        <p>India's raw <em>new_cases</em> can appear much larger than others simply due to its population of ~1.38 billion. Switching to <em>Cases per Million</em> provides a fair cross-country comparison and is the preferred metric for epidemiological analysis.</p>
+      </div>
+
+      <div class="insight-item caveat">
+        <h3>Caveats &amp; Limitations</h3>
+        <p>Correlation between vaccination rollout and falling cases does <strong>not</strong> imply causation. Concurrent public health measures, seasonality, and variant fitness all interact. Reporting standards differ across countries, and monthly aggregation smooths over shorter term daily spikes.</p>
+      </div>
+
+      <div class="insight-item design">
+        <h3>Design Choices</h3>
+        <p>Outlier spikes are capped (3x IQR outer fence) rather than dropped, preserving the timeline while preventing extreme values from collapsing the y axis. A 3 month rolling mean overlay is available as an optional toggle to reduce short term noise.</p>
+      </div>
+
+      <div class="insight-item design">
+        <h3>Missing Data Handling</h3>
+        <p>Six sparse NaNs in <em>new_vaccinations</em>, all in pre rollout periods or isolated reporting gaps, are filled with 0. This is semantically correct for the pre rollout case and a conservative choice for later gaps, clearly flagged here rather than silently interpolated.</p>
+      </div>
+
+    </div>
+  </section>
+
+</main>
+
+<footer>
+  <div class="container">
+    COVID-19 Global Trends Dashboard &nbsp;&bull;&nbsp; Data: Our World in Data &nbsp;&bull;&nbsp; Built with Flask &amp; Plotly
+  </div>
+</footer>
+
+<!-- Part C / D - Chart initialisation & fetch interactions -->
+<script>
+(function () {
+  "use strict";
+
+  /* Plotly layout defaults */
+  const BASE_LAYOUT = {
+    paper_bgcolor: "#fff",
+    plot_bgcolor:  "#fff",
+    font: { color: "#111", family: "-apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif", size: 13 },
+    xaxis: {
+      title: { text: "Date", font: { size: 13, color: "#111" }, standoff: 10 },
+      gridcolor: "#e0e0e0",
+      linecolor: "#333",
+      linewidth: 1,
+      showline: true,
+      showgrid: true,
+      ticks: "outside",
+      tickcolor: "#333",
+      ticklen: 5,
+      tickfont: { size: 12, color: "#111" },
+      tickformat: "%b %Y",
+      tickangle: -30,
+    },
+    yaxis: {
+      title: { text: "", font: { size: 13, color: "#111" }, standoff: 10 },
+      gridcolor: "#e0e0e0",
+      linecolor: "#333",
+      linewidth: 1,
+      showline: true,
+      showgrid: true,
+      ticks: "outside",
+      tickcolor: "#333",
+      ticklen: 5,
+      tickfont: { size: 12, color: "#111" },
+      rangemode: "tozero",
+    },
+    legend: { bgcolor: "#fff", bordercolor: "#bbb", borderwidth: 1, font: { size: 12, color: "#111" } },
+    margin: { l: 70, r: 20, t: 55, b: 80 },
+    hovermode: "x unified",
+    hoverlabel: { bgcolor: "#fff", bordercolor: "#333", font: { color: "#111", size: 12 } },
+  };
+
+  /* State */
+  let showRolling = false;
+
+  /* Build Plotly traces from API payload */
+  function buildTraces(json) {
+    const traces = [
+      {
+        x: json.dates,
+        y: json.values,
+        type: "scatter",
+        mode: "lines+markers",
+        name: json.country,
+        line: { color: "#1a6bb5", width: 2 },
+        marker: { size: 4, color: "#1a6bb5" },
+        hovertemplate: "%{x|%b %Y}<br>" + json.metric_label + ": <b>%{y:,.0f}</b><extra></extra>",
+      },
+    ];
+
+    if (showRolling) {
+      traces.push({
+        x: json.dates,
+        y: json.rolling,
+        type: "scatter",
+        mode: "lines",
+        name: "3 month rolling mean",
+        line: { color: "#888", width: 1.5, dash: "dash" },
+        hovertemplate: "%{x|%b %Y}<br>Rolling mean: <b>%{y:,.0f}</b><extra></extra>",
+      });
+    }
+
+    return traces;
+  }
+
+  /* Build layout with dynamic y-axis label */
+  function buildLayout(metricLabel, country) {
+    return Object.assign({}, BASE_LAYOUT, {
+      title: {
+        text: metricLabel + " (" + country + ")",
+        font: { size: 14, color: "#111" },
+        x: 0.02,
+      },
+      yaxis: Object.assign({}, BASE_LAYOUT.yaxis, {
+        title: { text: metricLabel, font: { size: 12, color: "#8b949e" } },
+      }),
+    });
+  }
+
+  /* Initial render using server-injected data (no fetch needed) */
+  const INITIAL = {{ initial_data | safe }};
+
+  Plotly.newPlot(
+    "chart",
+    buildTraces(INITIAL),
+    buildLayout(INITIAL.metric_label, INITIAL.country),
+    { responsive: true, displayModeBar: true, displaylogo: false }
+  );
+
+  /* Fetch new data and re-render chart */
+  async function updateChart() {
+    const country = document.getElementById("countrySelect").value;
+    const metric  = document.querySelector("input[name='metric']:checked").value;
+
+    try {
+      const res  = await fetch("/data?country=" + encodeURIComponent(country) + "&metric=" + encodeURIComponent(metric));
+      if (!res.ok) throw new Error("Network response was not ok");
+      const json = await res.json();
+
+      Plotly.react(
+        "chart",
+        buildTraces(json),
+        buildLayout(json.metric_label, json.country)
+      );
+    } catch (err) {
+      console.error("Chart update failed:", err);
+    }
+  }
+
+  /* Wire up controls */
+  document.getElementById("countrySelect")
+    .addEventListener("change", updateChart);
+
+  document.querySelectorAll("input[name='metric']")
+    .forEach(function (r) { r.addEventListener("change", updateChart); });
+
+  document.getElementById("rollingToggle")
+    .addEventListener("change", function (e) {
+      showRolling = e.target.checked;
+      updateChart();
+    });
+
+})();
+</script>
+
+</body>
+</html>
