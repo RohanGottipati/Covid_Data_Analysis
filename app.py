@@ -13,8 +13,6 @@ app = Flask(__name__)
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 CLEANED_CSV = os.path.join(BASE_DIR, "COVID_Country_Sample_cleaned.csv")
 
-NUMERIC_COLS = ["new_cases", "new_deaths", "new_vaccinations", "cases_per_million"]
-
 METRIC_LABELS = {
     "new_cases": "New Cases",
     "new_deaths": "New Deaths",
